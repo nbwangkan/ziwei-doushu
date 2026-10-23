@@ -302,7 +302,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
 
     const userMsg: Message = { role: 'user', content: text, hidden };
     // Capture current messages synchronously via ref (avoids stale closure)
-    const apiMessages = [...messagesRef.current, userMsg].filter(m => !m.failed).map(m => ({
+    const apiMessages = [...messagesRef.current, userMsg].filter(m => !m.failed && m.content.trim()).map(m => ({
       role: m.role,
       content: m.content,
     }));

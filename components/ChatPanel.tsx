@@ -46,7 +46,7 @@ export default function ChatPanel({ chart }: ChatPanelProps) {
       const res = await fetch('/api/interpret', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chart, messages: [...messages, userMsg].filter(message => !message.failed) }),
+        body: JSON.stringify({ chart, messages: [...messages, userMsg].filter(message => !message.failed && message.content.trim()) }),
       });
 
       await checkInterpretationResponse(res);
