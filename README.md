@@ -1,5 +1,7 @@
 <div align="center">
 
+> **本副本新增 AI 解读接口**：已实现 `/api/interpret`、兼容服务配置和流式显示；请先阅读 [AI 配置说明](docs/AI_SETUP.md)。只填密钥即可启用本副本新增的基础解读，但不包含原作者官网的私有批文库。下方原项目说明中的“不开源接口”描述保留为上游背景。
+
 # 紫微斗数 · 开源排盘引擎
 
 [![CI](https://github.com/Renhuai123/ziwei-doushu/actions/workflows/ci.yml/badge.svg)](https://github.com/Renhuai123/ziwei-doushu/actions/workflows/ci.yml)
