@@ -3,11 +3,13 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ZiweiChart, Palace } from '@/lib/ziwei/types';
 import type { TimeView } from './TimeNav';
+import { checkInterpretationResponse, readInterpretationStream } from '@/lib/ai/client';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   hidden?: boolean; // don't show user bubble for auto/topic messages
+  failed?: boolean;
 }
 
 interface SelectedSiHua {
@@ -189,7 +191,6 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
   const [activeTopic, setActiveTopic] = useState<string>('overview');
   const messagesRef = useRef<Message[]>([]); // always-current copy for closures
   const loadingRef = useRef(false);
-  const autoLoaded = useRef(false);
   const lastPalaceBranch = useRef<number | undefined>(undefined);
   const lastSiHuaKey = useRef<string | undefined>(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -205,16 +206,9 @@ export default function InsightPanel({ chart, selectedPalace, selectedSiHua }: I
     }
   }, [messages]);
 
-  // Auto-generate 命格总览 on mount
-  useEffect(() => {
-    if (autoLoaded.current) return;
-    autoLoaded.current = true;
-    sendMessage(TOPIC_PROMPTS.overview, true);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Inject palace analysis when palace selected
   useEffect(() => {
-    if (!selectedPalace || selectedPalace.branch === lastPalaceBranch.current) return;
+    if (!messagesRef.current.length || !selectedPalace || selectedPalace.branch === lastPalaceBranch.current) return;
     lastPalaceBranch.current = selectedPalace.branch;
 
     const majorStars = selectedPalace.stars.filter(s => s.type === 'major');
@@ -242,7 +236,7 @@ ${selectedPalace.name}在命盘中的意义，以及这种星曜配置的整体�
 
   // 注入四化飞化分析
   useEffect(() => {
-    if (!selectedSiHua) return;
+    if (!messagesRef.current.length || !selectedSiHua) return;
     const key = `${selectedSiHua.starName}-${selectedSiHua.siHua}-${selectedSiHua.view}`;
     if (key === lastSiHuaKey.current) return;
     lastSiHuaKey.current = key;
@@ -281,38 +275,20 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chart, messages: apiMessages }),
       });
-      if (res.status === 404) throw new Error('api-missing');
-      if (!res.ok) throw new Error('请求失败');
-      if (!res.body) throw new Error('无响应流');
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantText = '';
-
+      await checkInterpretationResponse(res);
       setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split('\n')) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const delta = JSON.parse(data).delta?.text ?? '';
-            assistantText += delta;
-            setMessages(prev => {
-              const updated = [...prev];
-              updated[updated.length - 1] = { role: 'assistant', content: assistantText };
-              return updated;
-            });
-          } catch { /* skip */ }
-        }
-      }
+      await readInterpretationStream(res.body, content => {
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: 'assistant', content };
+          return updated;
+        });
+      });
     } catch (e) {
-      const missing = e instanceof Error && e.message === 'api-missing';
-      setMessages(prev => [...prev, { role: 'assistant', content: missing ? '开源版不含 AI 解读接口（/api/interpret），需要你自己实现后才能用，详见 README「快速开始」。排盘本身不需要任何 API Key。' : '解读失败，请稍后重试。' }]);
+      setMessages(prev => [...prev, {
+        role: 'assistant', failed: true,
+        content: e instanceof Error ? e.message : '解读失败，请稍后重试。',
+      }]);
     } finally {
       setLoading(false);
       loadingRef.current = false;
@@ -326,7 +302,7 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
 
     const userMsg: Message = { role: 'user', content: text, hidden };
     // Capture current messages synchronously via ref (avoids stale closure)
-    const apiMessages = [...messagesRef.current, userMsg].map(m => ({
+    const apiMessages = [...messagesRef.current, userMsg].filter(m => !m.failed).map(m => ({
       role: m.role,
       content: m.content,
     }));
@@ -380,7 +356,14 @@ ${selectedSiHua.starName}化${selectedSiHua.siHua}落在【${palaceName}】，�
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="text-4xl mb-3" style={{ color: 'var(--t-gold)', opacity: 0.1 }}>✦</div>
-            <p className="text-[10px] animate-pulse" style={{ color: 'var(--t-faint)' }}>命格解读生成中…</p>
+            <p className="text-[10px] mb-3" style={{ color: 'var(--t-faint)' }}>选择上方主题，或点击下方按钮开始解读。</p>
+            <button
+              onClick={() => sendMessage(TOPIC_PROMPTS.overview, true)}
+              disabled={loading}
+              className="rounded-lg px-4 py-2 text-xs disabled:opacity-40"
+              style={{ color: 'var(--t-gold)', border: '1px solid var(--t-border)' }}
+            >生成命格解读</button>
+            <p className="text-[10px] mt-3" style={{ color: 'var(--t-faint)' }}>生成时会把命盘结构和提问发送给你配置的模型服务。</p>
           </div>
         )}
 
